@@ -1,193 +1,217 @@
+// promise封装
+let resolvePromise = (promise, x, resolve, reject) => {
+    if (promise === x) {
+        return reject(new TypeError('循环引用')) 
+    }
+    if (typeof x === 'function' || (typeof x === 'object' && x !== null)) {
+        let called;
+        try {
+            let then = x.then;
+            if (typeof then === 'function') {
+                then.call(x, y => {
+                    if (called) return;
+                    called = true;
+                    resolvePromise(promise, y, resolve, reject);
+                }, r => {
+                    if (called) return;
+                    called = true;
+                    reject(r);
+                });
+            } else {
+                resolve(x);
+            }
+        } catch (e) {
+            if (called) return;
+            called = true;
+            reject(e);
+        }
+    } else {
+        resolve(x);
+    }
+}
+
 class Promise {
-	constructor (executor) {
-		let self = this;
-		self.value = undefined;
-		self.reason = undefined;
-		self.status = 'pending';
-		self.onResolvedCallbacks = [];
-		self.onRejectedCallbacks = [];
+    constructor (executor) {
+        this.status = 'pending';
+        this.value = undefined;
+        this.reason = undefined;
+        this.onFufiledCallbacks = [];
+        this.onRejectedCallbacks = [];
+        
+        let resolve = (value) => {
+            if (value instanceof Promise) {
+                return value.then(resolve, reject);
+            }
+            if (this.status === 'pending') {
+                this.status = 'fulfiled';
+                this.value = value;
+                this.onFufiledCallbacks.forEach(fn => fn());
+            }
+        }
+        let reject = (reason) => {
+            if (this.status === 'pending') {
+                this.status = 'rejected';
+                this.reason = reason;
+                this.onRejectedCallbacks.forEach(fn => fn());
+            }
+        } 
+        try {
+            executor(resolve, reject);
+        } catch (e) {
+            reject(e);
+        }
+    }
+    then (onFufiled, onRejected) {
+        let promise2;
+        onFufiled = typeof onFufiled === 'function' ? onFufiled : d => d;
+        onRejected = typeof onRejected === 'function' ? onRejected : r => {throw r};
+        promise2 = new Promise((resolve, reject) => {
+            if (this.status === 'fulfiled') {
+                setTimeout(()=>{
+                    try {
+                        let x = onFufiled(this.value);
+                        resolvePromise(promise2, x, resolve, reject);
+                    } catch (e) {
+                        reject(e);
+                    }
+                },0)
+            }
+            if (this.status === 'rejected') {
+                setTimeout(()=>{
+                    try {
+                        let x = onRejected(this.reason);;
+                        resolvePromise(promise2, x, resolve, reject);
+                    } catch (e) {
+                        reject(e);
+                    }
+                    
+                },0)
+            }
+            if (this.status === 'pending') {
+                this.onFufiledCallbacks.push(() => {
+                    setTimeout(()=>{
+                        try {
+                            let x = onFufiled(this.value);
+                            resolvePromise(promise2, x, resolve, reject);
+                        } catch (e) {
+                            reject(e);
+                        }
+                        
+                    },0)
+                    
+                });
+                this.onRejectedCallbacks.push(() => {
+                    setTimeout(()=>{
+                        try {
+                            let x = onRejected(this.reason);
+                            resolvePromise(promise2, x, resolve, reject);
+                        } catch (e) {
+                            reject(e);
+                        }
+                        
+                    },0)
+                    
+                });
+            }
+        });
+        return promise2;
+    }
+    catch (rejectFn) {
+        return this.then(null, rejectFn);
+    }
+    finally (fn) {
+        return this.then((data) => {
+            return Promise.resolve(fn()).then(()=>data);
+        }, (err) => {
+            return Promise.resolve(fn()).then(()=>{throw err});
+        });
+    }
+}
 
-		// 等待 => 成功， 等待 => 失败， 成功 <≠> 失败
-		let resolve = value => {
-			if (self.status === 'pending') {
-				self.value = value;
-				self.status = 'resolved';
-				self.onResolvedCallbacks.forEach( fn => {
-					fn();
-				});
+Promise.resolve = (value) => {
+    return new Promise((resolve, reject) => {
+        resolve(value)
+    })
+}
 
-			}
-		}
+Promise.reject = (reason) => {
+    return new Promise((resolve, reject) => {
+        reject(reason)
+    })
+}
 
-		let reject = reason => {
-			if (self.status === 'pending') {
-				self.reason = reason;
-				self.status = 'rejected';
-				self.onRejectedCallbacks.forEach( fn => {
-					fn();
-				});
-			}
-		}
-
-		try {
-			executor(resolve, reject);
-		} catch (e) {
-			reject(e);
-		}
-	}
-	then (onFulfilled, onRejected) {
-		// 值的穿透
-		onFulfilled = typeof onFulfilled === 'function' ? onFulfilled : function(data) {
-			return data;
-		}
-		onRejected = typeof onRejected === 'function' ? onRejected : function(err) {
-			throw err;
-		}
-		let self = this;
-		let promise2 = new Promise( (resolve, reject) => {
-			if (self.status === 'resolved') {
-				setTimeout(function () {	// promise是异步执行的
-					try {
-						let x = onFulfilled(self.value);
-						resolvePromise(x, promise2, resolve, reject);
-					} catch (e) {
-						reject(e);
-					}
-				}, 0);
-			}
-			if (self.status === 'rejected') {
-				setTimeout(function () {
-					try {
-						let x = onRejected(self.reason);
-						resolvePromise(x, promise2, resolve, reject);
-					} catch (e) {
-						reject(e);
-					}
-				}, 0);
-			}
-			if (self.status === 'pending') {
-				self.onResolvedCallbacks.push(function () {
-					setTimeout(function () {
-						try {
-							let x = onFulfilled(self.value);
-							resolvePromise(x, promise2, resolve, reject);
-						} catch (e) {
-							reject(e);
-						}
-					}, 0);
-				});
-				self.onRejectedCallbacks.push(function () {
-					setTimeout(function () {
-						try {
-							let x = onRejected(self.reason);
-							resolvePromise(x, promise2, resolve, reject);
-						} catch (e) {
-							reject(e);
-						}
-					}, 0);
-				});
-			}
-		});
-
-		return promise2;
-	}
-	finally (fn) {
-		return this.then(data => {
-			fn();
-			return data;
-		}, err => {
-			fn();
-			throw err;
-		})
-	}
-	catch (onRejected) {
-		return this.then(null, onRejected)
-	}
-	resolve () {
-		return new Promise((resolve, reject) => {
-			resolve(data);
-		})
-	}
-	reject () {
-		return new Promise((resolve, reject) => {
-			reject(reason);
-		})
-	}
-	all (promises) {
-		// 方法要依次执行，利用计数器判断，所有方法执行完成，返回成功，有一个失败即失败
-		return new Promise((resolve, reject) => {
-			let arr = [];
-			let sum = 0;
-			function save (index, data) {
-				sum++;
-				arr[index] = data;
-				if (sum === promises.length) {
-					resolve(arr);
-				}
-			}
-			for (let i = 0; i < promises.length; i++) {
-				let promise = promises[i];
-				if (typeof promise.then === 'function') {
-					promise.then( data => {
-						save(i, data);
-					}, err => {
-						reject(err);
-					});
-				} else {
-					save(i, data);
-				}
-			}
-		})
-
-	}
-	race (promises) {
-		return new Promise((resolve, reject) => {
-			for (let i = 0; i < promises.length; i++) {
-				let promise = promises[i];
-				if (typeof promise.then === 'function') {
-					promise.then(data => {
-						resolve(data);
-					}, err => {
-						reject(err);
-					});
-				} else {
-					resolve(promise);
-				}
-			}
-		})
-	}
+Promise.all = (values) => {
+    return new Promise((resolve, reject)=>{
+        let results = [];
+        let i = 0;
+        let processData = (value, index)=>{
+            results[index] = value;
+            if (++i === values.length) {
+                resolve(results)
+            }
+        }
+        for (let i=0;i<values.length;i++){
+            let current = values[i];
+            if (typeof current === 'function' || (typeof current == 'object' && current != null)) {
+                if (typeof current.then == 'function') {
+                    current.then(x=>{
+                        processData(x, i)
+                    },reject)
+                } else {
+                    processData(current, i)
+                }
+            } else {
+                processData(current, i)
+            }
+        }
+    })
 } 
 
-let resolvePromise = (x, promise2, resolve, reject) => {
-	let called;		// 成功和失败只能有一个状态
-	if (x === promise2) {
-		return reject(new TypeError('循环引用'));	
-	}
-	if (x !== null && (typeof x === 'object' || typeof x === 'function')) {
-		try {
-			let then = x.then;
-			if (typeof then === 'function') {
-				then.call(x, y => {
-					if (!called) {
-						called = true;
-						// y 可能是一个函数，需要递归比较
-						resolvePromise (y, promise2, resolve, reject);
-					}
-				}, r => {
-					if (!called) {
-						called = true;
-						reject(r);
-					}
-				});
-			} else {
-				resolve(x);
-			}
-		} catch (e) {
-			reject(e);
-		}
-	} else {
-		resolve(x);
-	}
+Promise.race = (values) => {
+    return new Promise((resolve, reject)=>{
+        for (let i=0;i<values.length;i++){
+            let current = values[i];
+            if (typeof current === 'function' || (typeof current == 'object' && current != null)) {
+                if (typeof current.then == 'function') {
+                    current.then(x=>{
+                        resolve(x)
+                    },reject)
+                } else {
+                    resolve(current)
+                }
+            } else {
+                resolve(current)
+            }
+        }
+    })
+} 
+
+Promise.defer = Promise.deferred = function(){
+    let dfd = {};
+    dfd.promise = new Promise((resolve, reject) => {
+        dfd.resolve = resolve;
+        dfd.reject = reject;
+    })
+    return dfd;
 }
 
 module.exports = Promise;
+
+
+
+
+// 数组扁平化
+let newArr = [[1,2,3,[4,5,[6]]],[4,5,6,[7,8,[9]]],[7,8,9]];
+
+let process = (arr) => {
+    return arr.reduce((prev, curr) => {
+        if (curr instanceof Array) {
+            curr = process([...curr])
+        } else {
+            curr = [curr]
+        }
+        return [...prev, ...curr]
+    },[]);
+}
+
+console.log(process(newArr))
